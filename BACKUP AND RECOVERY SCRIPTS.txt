@@ -1,0 +1,497 @@
+Backup Scripts: Bash scripts for MySQL and PostgreSQL.
+
+Recovery Scripts: Bash scripts for MySQL and PostgreSQL.
+
+Documentation: A detailed markdown document outlining the process, best practices, and verification steps.
+
+DELIVERABLE: Database Backup and Recovery Solution
+
+1. Backup Scripts
+These scripts are designed for logical backups (SQL dumps), suitable for routine backups of small to medium-sized databases. They include timestamping for easy management and a basic logging mechanism.
+
+Pre-requisites for all scripts:
+
+Ensure the respective database client (mysql, mysqldump, psql, pg_dump) is installed and accessible in the system's PATH.
+
+The user executing the script must have read/backup privileges on the database.
+
+The BACKUP_DIR must exist and the user must have write permissions to it.
+
+1.1. backup_mysql.sh
+Bash
+
+#!/bin/bash
+
+# --- Configuration ---
+DB_USER="root"                 # MySQL Username
+DB_PASSWORD="your_mysql_password" # MySQL Password (replace with your actual password or use .my.cnf)
+DB_HOST="localhost"            # MySQL Host
+DB_NAME="ecommerce_db"         # Database to backup
+BACKUP_DIR="/var/backups/mysql" # Directory to store backups
+LOG_FILE="/var/log/mysql_backup.log" # Log file for script execution
+
+# --- Script Logic ---
+
+# Create backup directory if it doesn't exist
+mkdir -p "$BACKUP_DIR"
+
+# Get current timestamp for filename
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql"
+
+echo "--- MySQL Backup Started: $(date) ---" | tee -a "$LOG_FILE"
+echo "Backing up database: $DB_NAME to $BACKUP_FILE" | tee -a "$LOG_FILE"
+
+# Perform the backup
+# Using -p$DB_PASSWORD directly is less secure; consider ~/.my.cnf for production
+mysqldump -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" "$DB_NAME" > "$BACKUP_FILE" 2>> "$LOG_FILE"
+
+# Check if backup was successful
+if [ $? -eq 0 ]; then
+    echo "MySQL Backup SUCCESSFUL: $BACKUP_FILE" | tee -a "$LOG_FILE"
+    # Optional: Clean up old backups (e.g., keep last 7 days)
+    # find "$BACKUP_DIR" -type f -name "${DB_NAME}_*.sql" -mtime +7 -delete
+    # echo "Old backups cleaned up." | tee -a "$LOG_FILE"
+else
+    echo "MySQL Backup FAILED for $DB_NAME" | tee -a "$LOG_FILE"
+    # Add alert mechanism here (e.g., email notification)
+fi
+
+echo "--- MySQL Backup Finished: $(date) ---" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+1.2. backup_postgresql.sh
+Bash
+
+#!/bin/bash
+
+# --- Configuration ---
+PG_USER="postgres"             # PostgreSQL Username
+PG_HOST="localhost"            # PostgreSQL Host
+PG_PORT="5432"                 # PostgreSQL Port
+DB_NAME="ecommerce_db"         # Database to backup
+BACKUP_DIR="/var/backups/postgresql" # Directory to store backups
+LOG_FILE="/var/log/postgresql_backup.log" # Log file for script execution
+
+# --- Script Logic ---
+
+# Set PGPASSWORD environment variable for pg_dump (less secure for direct shell, but common for scripts)
+# For production, consider .pgpass file or other secure methods.
+# export PGPASSWORD="your_pg_password" # Uncomment and replace with your actual password
+
+# Create backup directory if it doesn't exist
+mkdir -p "$BACKUP_DIR"
+
+# Get current timestamp for filename
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql"
+
+echo "--- PostgreSQL Backup Started: $(date) ---" | tee -a "$LOG_FILE"
+echo "Backing up database: $DB_NAME to $BACKUP_FILE" | tee -a "$LOG_FILE"
+
+# Perform the backup
+# pg_dump will prompt for password if PGPASSWORD is not set and .pgpass is not used
+pg_dump -U "$PG_USER" -h "$PG_HOST" -p "$PG_PORT" "$DB_NAME" > "$BACKUP_FILE" 2>> "$LOG_FILE"
+
+# Check if backup was successful
+if [ $? -eq 0 ]; then
+    echo "PostgreSQL Backup SUCCESSFUL: $BACKUP_FILE" | tee -a "$LOG_FILE"
+    # Optional: Clean up old backups (e.g., keep last 7 days)
+    # find "$BACKUP_DIR" -type f -name "${DB_NAME}_*.sql" -mtime +7 -delete
+    # echo "Old backups cleaned up." | tee -a "$LOG_FILE"
+else
+    echo "PostgreSQL Backup FAILED for $DB_NAME" | tee -a "$LOG_FILE"
+    # Add alert mechanism here (e.g., email notification)
+fi
+
+echo "--- PostgreSQL Backup Finished: $(date) ---" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+# Unset PGPASSWORD (important for security if set)
+# unset PGPASSWORD
+
+2. Recovery Scripts
+These scripts facilitate restoring a database from a SQL dump file. They assume the database being restored to already exists (though empty) or will be created by the restore process.
+
+Important Note for Recovery:
+
+Data Loss: Restoring a database will overwrite its entire content. Ensure you have the correct backup file and understand the implications before proceeding.
+
+New Database: Often, you'll restore to a newly created, empty database. The scripts demonstrate this. If restoring to an existing database, ensure it's empty or handle existing data carefully (e.g., DROP TABLE IF EXISTS in the backup dump).
+
+2.1. restore_mysql.sh
+Bash
+
+#!/bin/bash
+
+# --- Configuration ---
+DB_USER="root"                 # MySQL Username
+DB_PASSWORD="your_mysql_password" # MySQL Password
+DB_HOST="localhost"            # MySQL Host
+DB_NAME="ecommerce_db"         # Database to restore TO
+BACKUP_FILE="/var/backups/mysql/ecommerce_db_20250705_100000.sql" # Path to the backup file to restore
+LOG_FILE="/var/log/mysql_restore.log" # Log file for script execution
+
+# --- Script Logic ---
+
+echo "--- MySQL Restore Started: $(date) ---" | tee -a "$LOG_FILE"
+echo "Attempting to restore $BACKUP_FILE to database $DB_NAME on $DB_HOST" | tee -a "$LOG_FILE"
+
+# Optional: Drop and recreate database (USE WITH EXTREME CAUTION IN PRODUCTION!)
+# This ensures a clean slate, but will destroy existing data.
+# echo "Dropping existing database $DB_NAME (if it exists)..." | tee -a "$LOG_FILE"
+# mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -e "DROP DATABASE IF EXISTS $DB_NAME;" 2>> "$LOG_FILE"
+# if [ $? -ne 0 ]; then
+#     echo "Error dropping database. Aborting restore." | tee -a "$LOG_FILE"
+#     exit 1
+# fi
+echo "Creating new database $DB_NAME..." | tee -a "$LOG_FILE"
+mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;" 2>> "$LOG_FILE"
+if [ $? -ne 0 ]; then
+    echo "Error creating database. Aborting restore." | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+echo "Restoring data from $BACKUP_FILE..." | tee -a "$LOG_FILE"
+mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" "$DB_NAME" < "$BACKUP_FILE" 2>> "$LOG_FILE"
+
+# Check if restore was successful
+if [ $? -eq 0 ]; then
+    echo "MySQL Restore SUCCESSFUL for $DB_NAME from $BACKUP_FILE" | tee -a "$LOG_FILE"
+else
+    echo "MySQL Restore FAILED for $DB_NAME from $BACKUP_FILE" | tee -a "$LOG_FILE"
+    # Add alert mechanism here
+fi
+
+echo "--- MySQL Restore Finished: $(date) ---" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+2.2. restore_postgresql.sh
+Bash
+
+#!/bin/bash
+
+# --- Configuration ---
+PG_USER="postgres"             # PostgreSQL Username
+PG_HOST="localhost"            # PostgreSQL Host
+PG_PORT="5432"                 # PostgreSQL Port
+DB_NAME="ecommerce_db"         # Database to restore TO
+BACKUP_FILE="/var/backups/postgresql/ecommerce_db_20250705_100000.sql" # Path to the backup file to restore
+LOG_FILE="/var/log/postgresql_restore.log" # Log file for script execution
+
+# --- Script Logic ---
+
+echo "--- PostgreSQL Restore Started: $(date) ---" | tee -a "$LOG_FILE"
+echo "Attempting to restore $BACKUP_FILE to database $DB_NAME on $PG_HOST:$PG_PORT" | tee -a "$LOG_FILE"
+
+# Set PGPASSWORD for psql
+# export PGPASSWORD="your_pg_password" # Uncomment and replace with your actual password
+
+# Optional: Drop and recreate database (USE WITH EXTREME CAUTION IN PRODUCTION!)
+# This ensures a clean slate, but will destroy existing data.
+# Note: You cannot drop a database if there are active connections.
+# echo "Dropping existing database $DB_NAME (if it exists)..." | tee -a "$LOG_FILE"
+# psql -U "$PG_USER" -h "$PG_HOST" -p "$PG_PORT" -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME;" 2>> "$LOG_FILE"
+# if [ $? -ne 0 ]; then
+#     echo "Error dropping database. Aborting restore." | tee -a "$LOG_FILE"
+#     exit 1
+# fi
+echo "Creating new database $DB_NAME..." | tee -a "$LOG_FILE"
+psql -U "$PG_USER" -h "$PG_HOST" -p "$PG_PORT" -d postgres -c "CREATE DATABASE IF NOT EXISTS $DB_NAME;" 2>> "$LOG_FILE"
+if [ $? -ne 0 ]; then
+    echo "Error creating database. Aborting restore." | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+echo "Restoring data from $BACKUP_FILE..." | tee -a "$LOG_FILE"
+psql -U "$PG_USER" -h "$PG_HOST" -p "$PG_PORT" -d "$DB_NAME" < "$BACKUP_FILE" 2>> "$LOG_FILE"
+
+# Check if restore was successful
+if [ $? -eq 0 ]; then
+    echo "PostgreSQL Restore SUCCESSFUL for $DB_NAME from $BACKUP_FILE" | tee -a "$LOG_FILE"
+else
+    echo "PostgreSQL Restore FAILED for $DB_NAME from $BACKUP_FILE" | tee -a "$LOG_FILE"
+    # Add alert mechanism here
+fi
+
+echo "--- PostgreSQL Restore Finished: $(date) ---" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+# Unset PGPASSWORD
+# unset PGPASSWORD
+3. Documentation of the Process
+Database Backup and Recovery Process Documentation
+
+Document Version: 1.0
+Date: July 5, 2025
+Prepared By: [Your Name/Team]
+
+Table of Contents
+
+Introduction
+
+Backup Strategy
+2.1. Backup Types
+2.2. Backup Frequency
+2.3. Retention Policy
+2.4. Storage Location
+
+Backup Procedures
+3.1. MySQL Backup
+3.2. PostgreSQL Backup
+
+Recovery Strategy
+4.1. Recovery Point Objective (RPO)
+4.2. Recovery Time Objective (RTO)
+4.3. Scenarios for Recovery
+
+Recovery Procedures
+5.1. MySQL Recovery
+5.2. PostgreSQL Recovery
+
+Verification and Testing
+6.1. Post-Backup Verification
+6.2. Post-Restore Verification
+6.3. Regular Restore Testing
+
+Monitoring and Alerts
+
+Security Considerations
+
+Lessons Learned & Future Improvements
+
+1. Introduction
+This document outlines the procedures for backing up and recovering critical database systems (MySQL and PostgreSQL) used by [Your Organization/Application Name]. The goal is to ensure data availability, prevent data loss, and enable rapid recovery in the event of unforeseen failures, corruption, or disasters.
+
+2. Backup Strategy
+2.1. Backup Types
+For this implementation, we are using logical backups (SQL Dumps).
+
+Pros: Highly portable across different versions and even database systems (with schema adjustments), human-readable, good for smaller to medium databases.
+
+Cons: Can be slower for very large databases, requires database server resources during backup, does not capture physical corruption.
+
+(Note: For very large or high-transaction production environments, consider physical backups, incremental backups, or Point-in-Time Recovery (PITR) using transaction logs.)
+
+2.2. Backup Frequency
+Critical Databases (e.g., ecommerce_db): Daily full logical backups.
+
+Other Databases: [Define frequency as per your needs, e.g., weekly, on change].
+
+2.3. Retention Policy
+Keep the last X (e.g., 7) daily full backups.
+
+Old backups older than the retention period will be automatically purged by the backup script (if enabled).
+
+2.4. Storage Location
+Primary storage: /var/backups/mysql for MySQL, /var/backups/postgresql for PostgreSQL on the database server.
+
+Secondary Storage: Backups are automatically copied to [e.g., S3 bucket, network share, offsite storage] daily after successful completion. This is CRITICAL for disaster recovery.
+
+3. Backup Procedures
+The backup process is automated using cron jobs to execute the provided bash scripts.
+
+3.1. MySQL Backup
+Script: /path/to/scripts/backup_mysql.sh
+
+Configuration:
+
+DB_USER: MySQL user with SELECT, LOCK TABLES privileges.
+
+DB_PASSWORD: Password for the DB_USER. Consider using .my.cnf for secure password handling in production.
+
+DB_HOST: Hostname or IP of the MySQL server.
+
+DB_NAME: Name of the database to backup.
+
+BACKUP_DIR: Local directory for backup files.
+
+LOG_FILE: Path for backup script logs.
+
+Execution:
+
+Manually: bash /path/to/scripts/backup_mysql.sh
+
+Automation (Cron Job Example): To run daily at 2 AM (02:00):
+
+Bash
+
+# Add to crontab -e
+0 2 * * * bash /path/to/scripts/backup_mysql.sh >> /var/log/cron.log 2>&1
+Expected Output: Log entries in /var/log/mysql_backup.log indicating success or failure.
+
+3.2. PostgreSQL Backup
+Script: /path/to/scripts/backup_postgresql.sh
+
+Configuration:
+
+PG_USER: PostgreSQL user with SELECT privileges.
+
+PG_HOST: Hostname or IP of the PostgreSQL server.
+
+PG_PORT: PostgreSQL port (default: 5432).
+
+DB_NAME: Name of the database to backup.
+
+BACKUP_DIR: Local directory for backup files.
+
+LOG_FILE: Path for backup script logs.
+
+Password Handling: For automation, use a .pgpass file (recommended) or set PGPASSWORD environment variable within the script (less secure).
+
+Execution:
+
+Manually: bash /path/to/scripts/backup_postgresql.sh
+
+Automation (Cron Job Example): To run daily at 2:30 AM (02:30):
+
+Bash
+
+# Add to crontab -e
+30 2 * * * bash /path/to/scripts/backup_postgresql.sh >> /var/log/cron.log 2>&1
+Expected Output: Log entries in /var/log/postgresql_backup.log indicating success or failure.
+
+4. Recovery Strategy
+4.1. Recovery Point Objective (RPO)
+Definition: The maximum tolerable period in which data might be lost from an IT service due to a major incident.
+
+Current RPO: 24 hours (due to daily full backups). For finer RPO, consider more frequent backups or PITR.
+
+4.2. Recovery Time Objective (RTO)
+Definition: The maximum tolerable duration that an application is unavailable due to a major incident.
+
+Current RTO: Estimated 1-2 hours for a full database restore from a logical backup, depending on database size and infrastructure.
+
+4.3. Scenarios for Recovery
+Accidental Data Deletion/Corruption: Restore to a point before the incident.
+
+Database Server Failure: Restore to a new or repaired database server.
+
+Disaster Recovery: Restore to an offsite location from secondary storage.
+
+5. Recovery Procedures
+WARNING: DATABASE RESTORATION OVERWRITES ALL EXISTING DATA IN THE TARGET DATABASE. PROCEED WITH EXTREME CAUTION.
+
+5.1. MySQL Recovery
+Script: /path/to/scripts/restore_mysql.sh
+
+Prerequisites:
+
+The MySQL server is running.
+
+A target database exists (or will be created by the script if uncommented). It should ideally be empty to avoid conflicts.
+
+The chosen BACKUP_FILE is accessible.
+
+Configuration: Update DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, and crucially, BACKUP_FILE in the script.
+
+Execution:
+
+Manually: bash /path/to/scripts/restore_mysql.sh
+
+Steps:
+
+Stop Application Services: Ensure no connections are actively writing to the database.
+
+Identify Backup: Choose the appropriate backup file (ecommerce_db_YYYYMMDD_HHMMSS.sql) for the desired recovery point. Update BACKUP_FILE in the script.
+
+Prepare Database: (Optional but Recommended) If restoring to a new server or clean instance, create the empty database:
+mysql -u root -p -e "CREATE DATABASE ecommerce_db;"
+If restoring to an existing database, ensure it is safe to overwrite. The script can drop/recreate, but use extreme caution.
+
+Execute Restore Script: bash /path/to/scripts/restore_mysql.sh
+
+Verify Data (Section 6.2).
+
+Restart Application Services.
+
+Expected Output: Log entries in /var/log/mysql_restore.log indicating success or failure.
+
+5.2. PostgreSQL Recovery
+Script: /path/to/scripts/restore_postgresql.sh
+
+Prerequisites:
+
+The PostgreSQL server is running.
+
+A target database exists (or will be created by the script if uncommented) and is ideally empty.
+
+The chosen BACKUP_FILE is accessible.
+
+Configuration: Update DB_NAME, PG_USER, PG_HOST, PG_PORT, and BACKUP_FILE in the script.
+
+Execution:
+
+Manually: bash /path/to/scripts/restore_postgresql.sh
+
+Steps:
+
+Stop Application Services: Ensure no connections are actively writing to the database.
+
+Identify Backup: Choose the appropriate backup file (ecommerce_db_YYYYMMDD_HHMMSS.sql). Update BACKUP_FILE in the script.
+
+Prepare Database: (Optional but Recommended) If restoring to a new server or clean instance, create the empty database:
+psql -U postgres -c "CREATE DATABASE ecommerce_db;"
+If dropping an existing database, ensure no active connections (SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'ecommerce_db';).
+
+Execute Restore Script: bash /path/to/scripts/restore_postgresql.sh
+
+Verify Data (Section 6.2).
+
+Restart Application Services.
+
+Expected Output: Log entries in /var/log/postgresql_restore.log indicating success or failure.
+
+6. Verification and Testing
+Verification is crucial to ensure backup validity and successful recovery.
+
+6.1. Post-Backup Verification
+Check Log Files: Regularly review mysql_backup.log and postgresql_backup.log for "SUCCESSFUL" messages and any errors/warnings.
+
+File Presence & Size: Verify that the backup file exists in BACKUP_DIR and its size is reasonable (not 0 bytes).
+
+Offsite Copy: Confirm that backups are successfully transferred to secondary storage.
+
+6.2. Post-Restore Verification (After performing a restore)
+Connect to Database: Use the appropriate client (mysql, psql) to connect to the restored database.
+
+Basic Data Checks:
+
+Row Counts: SELECT COUNT(*) FROM your_table; (for key tables). Compare with known counts or source.
+
+Data Integrity: SELECT SUM(numeric_column) FROM your_table; (for critical numeric columns).
+
+Spot Check: SELECT * FROM your_table WHERE id = [known_id]; (check a few specific rows for accuracy).
+
+Application-Level Testing: Connect your application to the restored database and perform typical operations (login, data entry, queries) to confirm full functionality.
+
+6.3. Regular Restore Testing
+Frequency: At least once every [e.g., quarter, month], perform a full test restore to a non-production environment.
+
+Process: Follow the full recovery procedure, including testing with the application.
+
+Documentation Update: Update this document with any lessons learned or improvements identified during testing.
+
+7. Monitoring and Alerts
+Implement monitoring for the backup cron jobs (e.g., check cron.log for script output, use health checks).
+
+Configure alerts (e.g., email, Slack notification) for FAILED messages in the backup/restore log files.
+
+Monitor disk space on BACKUP_DIR to prevent backup failures due to full disks.
+
+8. Security Considerations
+Database User Privileges: Grant only the necessary privileges to the backup user (read-only, LOCK TABLES). For restore, grant privileges to create/drop databases and tables.
+
+Password Handling: Avoid embedding plain text passwords directly in scripts for production. Use:
+
+MySQL: .my.cnf file with [client] section and password=
+
+PostgreSQL: .pgpass file for passwordless connections.
+
+Backup File Permissions: Secure backup files with restrictive file system permissions (chmod 600) to prevent unauthorized access.
+
+Encryption: Encrypt backup files, especially if storing them in cloud or offsite locations, to protect sensitive data.
+
+9. Lessons Learned & Future Improvements
+[Document any challenges encountered during initial setup or testing.]
+
+[Propose future improvements, e.g., transition to physical backups, implement PITR, use a dedicated backup solution (e.g., Percona XtraBackup, Barman, pgBackRest), integrate with central monitoring system.]
